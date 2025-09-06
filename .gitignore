@@ -120,7 +120,7 @@ celerybeat.pid
 *.sage.py
 
 # Environments
-.env
+.env*
 .venv
 env/
 venv/
@@ -183,3 +183,7 @@ cache/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Database files
+*.db
+*.db-journal
