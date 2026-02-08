@@ -1,6 +1,6 @@
 # Garmin Explorer — Implementation Plan
 
-**Last updated:** 2026-02-08 (v3 — Phase 2 done, Phase 3 done, stream page added)
+**Last updated:** 2026-02-08 (v4 — Phase 4 done: comprehensive dashboard with marathon countdown)
 **Domain:** https://fake-sporter.nebluda.com/
 **Server:** 89.167.10.158 (Ubuntu 24.04, `ssh web-nebluda`)
 **Stack:** Streamlit + garminconnect + SQLite + Plotly
@@ -134,26 +134,34 @@ Test:
 
 ---
 
-### Phase 4: Dashboard _(current)_
+### Phase 4: Dashboard ✅ _(done)_
 
 **Goal:** Visualize group fitness data.
 
 Files:
 
-- `pages/dashboard.py` — full implementation (metric cards, leaderboard, weekly trend chart)
+- `pages/dashboard.py` — full implementation with comprehensive stats
 
 Dashboard components:
 
-- **Metric cards** per person (this week: km, activities, calories)
-- **Leaderboard** — who moved the most this week
-- **Activity feed** — combined recent activities table
-- **Weekly trend chart** — Plotly bar chart: km per person, last 8 weeks
+- **Marathon countdown** — days until Geneva Marathon (May 10, 2026)
+- **This Week cards** — metric cards per person (km, activities, duration, calories)
+- **8-week trend** — Plotly grouped bar chart: weekly km per person
+- **Monthly recap** — Jan/Feb/Mar 2026 summary per person
+- **Recent activities** — last 5 activities stream with details
+
+Features:
+
+- Auto-expandable for new users (all charts update dynamically)
+- Dark theme with Plotly integration
+- Progress bar for marathon countdown
+- Formatted durations and distances
 
 Test:
 
 ```bash
 uv run streamlit run app.py
-# → Dashboard loads in <2s with real data
+# → Dashboard loads with real data, all charts responsive
 ```
 
 ---
