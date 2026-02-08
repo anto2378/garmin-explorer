@@ -1,0 +1,18 @@
+[project]
+name = "garmin-auth-tester"
+version = "1.0.0"
+description = "Simple Garmin Connect authentication testing toolkit"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.104.1",
+    "uvicorn[standard]>=0.24.0",
+    "garminconnect>=0.2.19",
+    "rich>=13.7.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/garmin-auth-tester"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
