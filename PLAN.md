@@ -1,6 +1,6 @@
 # Garmin Explorer — Implementation Plan
 
-**Last updated:** 2026-02-08 (v4 — Phase 4 done: comprehensive dashboard with marathon countdown)
+**Last updated:** 2026-02-08 (v5 — Phase 4 done: comprehensive dashboard, sidebar UX improved, fake data generator added)
 **Domain:** https://fake-sporter.nebluda.com/
 **Server:** 89.167.10.158 (Ubuntu 24.04, `ssh web-nebluda`)
 **Stack:** Streamlit + garminconnect + SQLite + Plotly
@@ -141,6 +141,7 @@ Test:
 Files:
 
 - `pages/dashboard.py` — full implementation with comprehensive stats
+- `lib/fake_data.py` — fake user and activity generator for testing
 
 Dashboard components:
 
@@ -154,7 +155,18 @@ Features:
 
 - Auto-expandable for new users (all charts update dynamically)
 - Dark theme with Plotly integration
-- Progress bar for marathon countdown
+- Progress bar for marathon countdo
+- **Fake data generator** — create test users with witty names and realistic activities
+- **Improved sidebar UX** — collapse/expand button always visible and properly aligned
+
+Fake Account Generator (`lib/fake_data.py`):
+
+- 15 witty preset names (speedy_gonzales, forest_gump, etc.)
+- Generates 10-100 realistic activities per user
+- Multiple activity types: running (60%), cycling (20%), walking, swimming, hiking
+- Activities spread over 90 days with realistic times, distances, paces, calories
+- Fake users display 🎭 badge and can be removed like real accounts
+- Useful for testing multi-user visualizationswn
 - Formatted durations and distances
 
 Test:

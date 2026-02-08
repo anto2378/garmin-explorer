@@ -3,7 +3,7 @@ Activity stream — shows all activities across all connected users.
 Useful for debugging and seeing who did what.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import streamlit as st
 
@@ -55,11 +55,60 @@ if not activities:
     st.info("No cached activities yet. Hit **Sync now** to fetch from Garmin.")
     st.stop()
 
+# --- Quick filters ---
 st.subheader(f"Recent activities ({len(activities)})")
+
+filter_col1, filter_col2, filter_col3, filter_col4 = st.columns([1, 1, 1, 3])
+
+with filter_col1:
+    filter_week = st.button("This week", use_container_width=True)
+with filter_col2:
+    filter_month = st.button("This month", use_container_width=True)
+with filter_col3:
+    filter_year = st.button("2026 year", use_container_width=True)
+
+# Apply filters
+now = datetime.now()
+filtered_activities = activities
+
+if filter_week:
+    # Get Monday of current week
+    monday = now - timedelta(days=now.weekday())
+    monday = monday.replace(hour=0, minute=0, second=0, microsecond=0)
+    filtered_activities = [
+        a
+        for a in activities
+        if a.get("start_time")
+        and datetime.fromisoformat(a["start_time"].replace("Z", "+00:00")) >= monday
+    ]
+elif filter_month:
+    # Get first day of current month
+    first_day = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    filtered_activities = [
+        a
+        for a in activities
+        if a.get("start_time")
+        and datetime.fromisoformat(a["start_time"].replace("Z", "+00:00")) >= first_day
+    ]
+elif filter_year:
+    # Get all 2026 activities
+    filtered_activities = [
+        a
+        for a in activities
+        if a.get("start_time") and a["start_time"].startswith("2026")
+    ]
+
+# Show filter info if active
+if filter_week or filter_month or filter_year:
+    st.caption(f"Showing {len(filtered_activities)} of {len(activities)} activities")
+else:
+    st.caption("Showing all activities")
+
+st.markdown("")
 
 # Build a clean table
 rows = []
-for a in activities:
+for a in filtered_activities:
     # Parse start time for display
     start = a.get("start_time", "")
     try:
@@ -100,4 +149,5 @@ st.dataframe(
     rows,
     use_container_width=True,
     hide_index=True,
+    height=600,
 )

@@ -9,6 +9,7 @@ from lib.database import (
     get_all_users,
     get_user_by_email,
 )
+from lib.fake_data import create_fake_user, get_available_fake_names
 from lib.garmin import (
     TOKENS_DIR,
     get_display_name,
@@ -29,31 +30,44 @@ except Exception:
     # Database might not have garmin_email column yet
     db_users = {}
 
-connected = []
+# Get users with tokens (real Garmin accounts)
+token_users = []
 if TOKENS_DIR.exists():
-    connected = [
+    token_users = [
         d.name for d in sorted(TOKENS_DIR.iterdir()) if d.is_dir() and any(d.iterdir())
     ]
 
-if connected:
-    for name in connected:
+# Combine: all DB users (including fake ones)
+all_users = set(db_users.keys()) | set(token_users)
+
+if all_users:
+    for name in sorted(all_users):
         user_data = db_users.get(name, {})
+        garmin_email = user_data.get("garmin_email") or ""
+        is_fake = garmin_email.endswith("@fake-runner.test")
+        has_token = name in token_users
 
         col1, col2, col3 = st.columns([3, 3, 1])
 
         # Name + email
-        col1.markdown(f"**{name.title()}**")
-        if user_data.get("garmin_email"):
-            col1.caption(user_data["garmin_email"])
+        col1.markdown(f"**{name.title()}**{' 🎭' if is_fake else ''}")
+        if garmin_email:
+            col1.caption(garmin_email)
 
         # Status
-        try:
-            client = resume(name)
-            display_name = get_display_name(client)
+        if is_fake:
             cached = get_activity_count(name)
-            col2.success(f"✅ {display_name} — {cached} activities")
-        except Exception:
-            col2.error("⚠️ Token expired")
+            col2.info(f"🎭 Fake account — {cached} activities")
+        elif has_token:
+            try:
+                client = resume(name)
+                display_name = get_display_name(client)
+                cached = get_activity_count(name)
+                col2.success(f"✅ {display_name} — {cached} activities")
+            except Exception:
+                col2.error("⚠️ Token expired")
+        else:
+            col2.warning("⚠️ No token found")
 
         # Remove button
         if col3.button(
@@ -66,16 +80,49 @@ if connected:
                 try:
                     # Delete from database
                     delete_user(name)
-                    # Delete token directory
+                    # Delete token directory if exists
                     token_dir = TOKENS_DIR / name
                     if token_dir.exists():
                         shutil.rmtree(token_dir)
-                    st.success(f"✅ Removed {name}")
+                    st.success(f"Removed {name}")
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ Failed to remove {name}: {e}")
 else:
     st.caption("No accounts connected yet.")
+
+# --- Generate fake account (minimal, at bottom) ---
+available_names = get_available_fake_names()
+
+if available_names:
+    st.caption("Create fake test accounts:")
+
+    col1, col2 = st.columns([3, 1])
+
+    with col1:
+        activity_preset = st.selectbox(
+            "Activities",
+            options=[
+                ("Light (20)", 20),
+                ("Medium (40)", 40),
+                ("Heavy (60)", 60),
+                ("Extreme (80)", 80),
+            ],
+            format_func=lambda x: x[0],
+            label_visibility="collapsed",
+        )
+
+    with col2:
+        if st.button("Generate", use_container_width=True, type="secondary"):
+            with st.spinner("Creating fake account..."):
+                try:
+                    result = create_fake_user(activity_count=activity_preset[1])
+                    st.success(
+                        f"Created **{result['display_name']}** with {result['activities_created']} activities!"
+                    )
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to create fake user: {e}")
 
 st.markdown("---")
 
@@ -89,7 +136,7 @@ with st.form("garmin_login"):
     )
     email = st.text_input("Garmin email", placeholder="you@example.com")
     password = st.text_input("Garmin password", type="password")
-    submitted = st.form_submit_button("🔐 Connect", use_container_width=True)
+    submitted = st.form_submit_button("Connect", use_container_width=True)
 
 if submitted:
     if not user_name or not email or not password:
