@@ -1,0 +1,20 @@
+[Unit]
+Description=Garmin Explorer Streamlit App
+After=network.target
+
+[Service]
+Type=simple
+User=garmin
+Group=garmin
+WorkingDirectory=/opt/garmin-explorer
+ExecStart=/usr/local/bin/uv run streamlit run app.py \
+    --server.port=8501 \
+    --server.address=127.0.0.1 \
+    --server.headless=true \
+    --browser.gatherUsageStats=false
+Restart=on-failure
+RestartSec=5
+Environment=HOME=/opt/garmin-explorer
+
+[Install]
+WantedBy=multi-user.target

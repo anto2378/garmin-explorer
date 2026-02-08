@@ -1,61 +1,8 @@
 [project]
 name = "garmin-explorer"
 version = "0.1.0"
-description = "FastAPI dashboard for Garmin Connect fitness data with real-time activity tracking, user management, and WhatsApp digest integration"
+description = "Shared Garmin Connect dashboard for friends — built with Streamlit"
 readme = "README.md"
-requires-python = ">=3.11"
-authors = [{ name = "Garmin Explorer Team", email = "team@garmin-explorer.com" }]
+requires-python = ">=3.12"
 license = { text = "MIT" }
-keywords = [
-    "garmin",
-    "fitness",
-    "fastapi",
-    "dashboard",
-    "activity-tracking",
-    "whatsapp-integration",
-]
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: End Users/Desktop",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
-    "Topic :: Software Development :: Libraries :: Python Modules",
-]
-dependencies = [
-    "fastapi>=0.104.1",
-    "uvicorn[standard]>=0.24.0",
-    "sqlalchemy>=2.0.23",
-    "psycopg[binary]>=3.2.0",
-    "alembic>=1.13.1",
-    "python-jose[cryptography]>=3.3.0",
-    "passlib[bcrypt]>=1.7.4",
-    "python-multipart>=0.0.6",
-    "pydantic>=2.5.0",
-    "pydantic-settings>=2.1.0",
-    "redis>=5.0.1",
-    "celery>=5.3.4",
-    "garminconnect>=0.2.19",
-    "cryptography>=40.0.0",
-    "python-dotenv>=1.0.0",
-]
-
-[project.optional-dependencies]
-dev = ["pytest>=7.0", "black>=22.0", "isort>=5.0", "flake8>=5.0"]
-
-[project.urls]
-Homepage = "https://github.com/garmin-explorer/garmin-explorer"
-Repository = "https://github.com/garmin-explorer/garmin-explorer"
-Documentation = "https://github.com/garmin-explorer/garmin-explorer#readme"
-Issues = "https://github.com/garmin-explorer/garmin-explorer/issues"
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[tool.hatch.build.targets.wheel]
-# Include all Python files in the root directory
-include = ["*.py", "README.md", "LICENSE", ".env.example"]
+dependencies = ["streamlit>=1.41.0", "garminconnect>=0.2.38", "plotly>=6.0.0"]
