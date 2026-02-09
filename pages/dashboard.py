@@ -16,6 +16,31 @@ import streamlit as st
 
 from lib.database import get_all_users, get_cached_activities
 
+
+def format_time_ago(dt: datetime) -> str:
+    """Format datetime as 'X hours ago' or 'X days ago'."""
+    now = datetime.now()
+    # Handle timezone-aware datetimes
+    if dt.tzinfo is not None:
+        from datetime import timezone
+        now = now.replace(tzinfo=timezone.utc)
+
+    delta = now - dt
+    seconds = delta.total_seconds()
+
+    if seconds < 60:
+        return "just now"
+    elif seconds < 3600:
+        mins = int(seconds / 60)
+        return f"{mins}m ago"
+    elif seconds < 86400:
+        hours = int(seconds / 3600)
+        return f"{hours}h ago"
+    else:
+        days = int(seconds / 86400)
+        return f"{days}d ago"
+
+
 # --- Config ---
 MARATHON_DATE = datetime(2026, 5, 12)
 TRAINING_START_DATE = datetime(2025, 11, 13)  # 180 days before race
@@ -35,24 +60,45 @@ with left_col:
     # Marathon Countdown
     days_to_marathon = (MARATHON_DATE - datetime.now()).days
     marathon_date_str = MARATHON_DATE.strftime("%B %d, %Y")
-    
-    st.markdown(f"""
+
+    st.markdown(
+        f"""
     <div style="text-align: center; padding: 1.5rem 0;">
         <h3 style="margin-bottom: 0.5rem;">🏃‍♂️ Geneva Marathon</h3>
         <h1 style="font-size: 4rem; margin: 0; color: #ff4b4b;">{days_to_marathon}</h1>
         <h4 style="margin-top: 0.5rem;">days to go</h4>
         <p style="color: #888; font-size: 1rem;">{marathon_date_str}</p>
     </div>
-    """, unsafe_allow_html=True)
-    
+    """,
+        unsafe_allow_html=True,
+    )
+
     # Training progress
     total_training_days = (MARATHON_DATE - TRAINING_START_DATE).days
     days_trained = (datetime.now() - TRAINING_START_DATE).days
     training_progress = max(0, min(1, days_trained / total_training_days))
-    
+
     st.caption("Training Progress")
     st.progress(training_progress)
     st.caption(f"Day {days_trained} of {total_training_days}")
+
+    # Last Sync Status
+    st.markdown("---")
+    st.caption("**Last Sync**")
+
+    for user_info in users:
+        display_name = user_info["display_name"] or user_info["name"].capitalize()
+        last_synced = user_info.get("last_synced_at")
+
+        if last_synced:
+            try:
+                dt = datetime.fromisoformat(last_synced)
+                time_ago = format_time_ago(dt)
+                st.caption(f"🟢 {display_name}: {time_ago}")
+            except (ValueError, TypeError):
+                st.caption(f"🟡 {display_name}: Never")
+        else:
+            st.caption(f"🟡 {display_name}: Never")
 
 with main_col:
     # --- Fetch all activities ---
@@ -108,9 +154,10 @@ def get_last_n_mondays(n: int) -> list[str]:
 with main_col:
     # --- Cumulative Group Stats ---
     st.markdown("### 🎯 Group Stats (All Time)")
-    
+
     # Custom CSS to make metric values larger
-    st.markdown("""
+    st.markdown(
+        """
     <style>
     [data-testid="stMetricValue"] {
         font-size: 2rem;
@@ -119,7 +166,9 @@ with main_col:
         font-size: 1.1rem;
     }
     </style>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
     total_distance = sum((a["distance_m"] or 0) for a in all_activities) / 1000
     total_activities = len(all_activities)
@@ -235,21 +284,31 @@ for week_idx, week in enumerate(week_labels):
     for user_info in users:
         user = user_info["name"]
         display_name = user_info["display_name"] or user.capitalize()
-        chart_rows.append({
-            "Week": week_numbers[week_idx],
-            "Runner": display_name,
-            "Distance (km)": weeks_data[week][user]
-        })
+        chart_rows.append(
+            {
+                "Week": week_numbers[week_idx],
+                "Runner": display_name,
+                "Distance (km)": weeks_data[week][user],
+            }
+        )
 
 chart_df = pd.DataFrame(chart_rows)
 
 # Create Altair chart with y-axis starting at 0
-chart = alt.Chart(chart_df).mark_bar().encode(
-    x=alt.X("Week:N", title="Week"),
-    y=alt.Y("Distance (km):Q", scale=alt.Scale(domain=[0, chart_df["Distance (km)"].max() * 1.1])),
-    color=alt.Color("Runner:N", scale=alt.Scale(range=colors[:len(users)])),
-    xOffset="Runner:N"
-).properties(height=400)
+chart = (
+    alt.Chart(chart_df)
+    .mark_bar()
+    .encode(
+        x=alt.X("Week:N", title="Week"),
+        y=alt.Y(
+            "Distance (km):Q",
+            scale=alt.Scale(domain=[0, chart_df["Distance (km)"].max() * 1.1]),
+        ),
+        color=alt.Color("Runner:N", scale=alt.Scale(range=colors[: len(users)])),
+        xOffset="Runner:N",
+    )
+    .properties(height=400)
+)
 
 st.altair_chart(chart, use_container_width=True)
 
@@ -282,9 +341,9 @@ table_data = []
 for user_info in users:
     user = user_info["name"]
     display_name = user_info["display_name"] or user.capitalize()
-    
+
     row = {"Runner": display_name}
-    
+
     # Add km and activity count for each month
     for month_key, month_name in zip(months_to_show, month_names):
         data = monthly_data[month_key][user]
@@ -294,7 +353,7 @@ for user_info in users:
         else:
             row[f"{month_name} km"] = "—"
             row[f"{month_name} #"] = "—"
-    
+
     table_data.append(row)
 
 if table_data:

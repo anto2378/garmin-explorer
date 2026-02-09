@@ -76,12 +76,21 @@ def get_client(
         raise
 
 
-def get_activities(client: Garmin, days: int = 30) -> list[dict]:
-    """Fetch recent activities for the given number of days."""
-    return client.get_activities_by_date(
-        startdate=(date.today() - timedelta(days=days)).isoformat(),
-        enddate=date.today().isoformat(),
-    )
+def get_activities(
+    client: Garmin,
+    days: int = 30,
+    start_date: str | None = None
+) -> list[dict]:
+    """
+    Fetch activities from Garmin.
+    If start_date provided, use it; otherwise fetch last N days.
+    """
+    if start_date:
+        startdate = start_date
+    else:
+        startdate = (date.today() - timedelta(days=days)).isoformat()
+    enddate = date.today().isoformat()
+    return client.get_activities_by_date(startdate, enddate)
 
 
 def get_display_name(client: Garmin) -> str:

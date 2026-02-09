@@ -8,8 +8,32 @@ from datetime import datetime, timedelta
 import streamlit as st
 
 from lib.cache import sync_all_users
-from lib.database import get_cached_activities
+from lib.database import get_all_users, get_cached_activities
 from lib.garmin import TOKENS_DIR
+
+
+def format_time_ago(dt: datetime) -> str:
+    """Format datetime as 'X hours ago' or 'X days ago'."""
+    now = datetime.now()
+    # Handle timezone-aware datetimes
+    if dt.tzinfo is not None:
+        from datetime import timezone
+        now = now.replace(tzinfo=timezone.utc)
+
+    delta = now - dt
+    seconds = delta.total_seconds()
+
+    if seconds < 60:
+        return "just now"
+    elif seconds < 3600:
+        mins = int(seconds / 60)
+        return f"{mins}m ago"
+    elif seconds < 86400:
+        hours = int(seconds / 3600)
+        return f"{hours}h ago"
+    else:
+        days = int(seconds / 86400)
+        return f"{days}d ago"
 
 st.title("📡 Stream")
 st.markdown("---")
@@ -29,9 +53,22 @@ if not connected:
 
 col1, col2 = st.columns([3, 1])
 with col1:
-    st.caption(
-        f"**{len(connected)}** connected account(s): {', '.join(u.title() for u in connected)}"
-    )
+    # Build status with last sync times
+    db_users = {u["name"]: u for u in get_all_users()}
+    status_parts = []
+    for u in connected:
+        user_info = db_users.get(u)
+        if user_info and user_info.get("last_synced_at"):
+            try:
+                dt = datetime.fromisoformat(user_info["last_synced_at"])
+                time_ago = format_time_ago(dt)
+                status_parts.append(f"{u.title()} ({time_ago})")
+            except:
+                status_parts.append(u.title())
+        else:
+            status_parts.append(f"{u.title()} (never)")
+
+    st.caption(f"**{len(connected)}** connected: {', '.join(status_parts)}")
 with col2:
     if st.button("🔄 Sync now", use_container_width=True):
         with st.spinner("Fetching activities from Garmin..."):

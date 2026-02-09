@@ -6,9 +6,12 @@ Tables: users, cached_activities, weekly_stats.
 """
 
 import json
+import logging
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 DB_PATH = DATA_DIR / "garmin.db"
@@ -52,11 +55,22 @@ CREATE TABLE IF NOT EXISTS weekly_stats (
 """
 
 
+def migrate_add_last_synced() -> None:
+    """Add last_synced_at column if it doesn't exist."""
+    with get_db() as db:
+        cursor = db.execute("PRAGMA table_info(users)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if "last_synced_at" not in columns:
+            db.execute("ALTER TABLE users ADD COLUMN last_synced_at TEXT")
+            logger.info("Added last_synced_at column to users table")
+
+
 def init_db() -> None:
     """Create database and tables if they don't exist."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with get_db() as db:
         db.executescript(_SCHEMA)
+    migrate_add_last_synced()
 
 
 @contextmanager
@@ -77,19 +91,23 @@ def get_db():
 
 
 def upsert_user(
-    name: str, garmin_email: str | None = None, display_name: str | None = None
+    name: str,
+    garmin_email: str | None = None,
+    display_name: str | None = None,
+    last_synced_at: str | None = None,
 ) -> None:
     """Insert or update a user."""
     with get_db() as db:
         db.execute(
             """
-            INSERT INTO users (name, garmin_email, display_name)
-            VALUES (?, ?, ?)
-            ON CONFLICT(name) DO UPDATE SET 
+            INSERT INTO users (name, garmin_email, display_name, last_synced_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(name) DO UPDATE SET
                 garmin_email = excluded.garmin_email,
-                display_name = excluded.display_name
+                display_name = excluded.display_name,
+                last_synced_at = COALESCE(excluded.last_synced_at, last_synced_at)
             """,
-            (name, garmin_email, display_name),
+            (name, garmin_email, display_name, last_synced_at),
         )
 
 

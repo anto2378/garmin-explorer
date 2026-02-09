@@ -1,0 +1,15 @@
+[Unit]
+Description=Garmin Explorer Daily Sync
+After=network.target
+
+[Service]
+Type=oneshot
+User=garmin
+Group=garmin
+WorkingDirectory=/opt/garmin-explorer
+ExecStart=/usr/local/bin/uv run python scripts/daily_sync.py
+Environment=HOME=/opt/garmin-explorer
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=garmin-sync

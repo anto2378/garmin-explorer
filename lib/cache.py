@@ -21,42 +21,48 @@ from lib.garmin import get_activities, get_display_name, resume
 
 logger = logging.getLogger(__name__)
 
-BACKFILL_DAYS = 90
-INCREMENTAL_DAYS = 7
+TRAINING_START_DATE = "2026-01-01"
 
 
 def sync_user(user_name: str, garmin_email: str | None = None) -> dict:
     """
     Sync a user's activities from Garmin API → local cache.
-
-    On first sync (no cached activities): fetches last 90 days.
-    On subsequent syncs: fetches last 7 days.
-
-    Returns a dict with sync results:
-        {"user": str, "display_name": str, "fetched": int, "cached": int, "new": int}
+    Always fetches from Jan 1, 2026 to today.
     """
     client = resume(user_name)
     display_name = get_display_name(client)
-    upsert_user(user_name, garmin_email, display_name)
 
-    # Decide how far back to fetch
-    existing_count = get_activity_count(user_name)
-    days = BACKFILL_DAYS if existing_count == 0 else INCREMENTAL_DAYS
+    # Fetch all activities from training start
+    activities = get_activities(client, start_date=TRAINING_START_DATE)
 
-    activities = get_activities(client, days=days)
-    new_count = upsert_activities(user_name, activities)
+    # Filter out pre-2026 activities (defense in depth)
+    activities_2026 = []
+    for a in activities:
+        start_time = a.get("startTimeLocal") or a.get("startTimeGMT") or ""
+        if start_time.startswith("2026"):
+            activities_2026.append(a)
+
+    new_count = upsert_activities(user_name, activities_2026)
+
+    # Update last sync timestamp
+    upsert_user(
+        user_name,
+        garmin_email,
+        display_name,
+        last_synced_at=datetime.now().isoformat()
+    )
 
     result = {
         "user": user_name,
         "display_name": display_name,
-        "fetched": len(activities),
+        "fetched": len(activities_2026),
         "cached": get_activity_count(user_name),
         "new": new_count,
     }
     logger.info(
         "Synced %s: fetched=%d, new=%d, total_cached=%d",
         user_name,
-        len(activities),
+        len(activities_2026),
         new_count,
         result["cached"],
     )
