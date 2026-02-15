@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS cached_activities (
     garmin_id      INTEGER NOT NULL,           -- Garmin activityId
     activity_type  TEXT,
     distance_m     REAL DEFAULT 0,
+    elevation_gain_m REAL DEFAULT 0,
     duration_s     REAL DEFAULT 0,
     calories       INTEGER DEFAULT 0,
     start_time     TEXT,                       -- ISO-8601
@@ -65,12 +66,43 @@ def migrate_add_last_synced() -> None:
             logger.info("Added last_synced_at column to users table")
 
 
+def migrate_add_elevation_gain() -> None:
+    """Add elevation_gain_m column and backfill from activity_json."""
+    with get_db() as db:
+        cursor = db.execute("PRAGMA table_info(cached_activities)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if "elevation_gain_m" not in columns:
+            db.execute("ALTER TABLE cached_activities ADD COLUMN elevation_gain_m REAL DEFAULT 0")
+            logger.info("Added elevation_gain_m column to cached_activities table")
+
+            # Backfill elevation from activity_json
+            rows = db.execute("SELECT id, activity_json FROM cached_activities").fetchall()
+            updated = 0
+            for row in rows:
+                activity_id = row[0]
+                activity_json = row[1]
+                if activity_json:
+                    try:
+                        activity_data = json.loads(activity_json)
+                        elevation_gain = activity_data.get("elevationGain", 0) or 0
+                        db.execute(
+                            "UPDATE cached_activities SET elevation_gain_m = ? WHERE id = ?",
+                            (elevation_gain, activity_id)
+                        )
+                        updated += 1
+                    except json.JSONDecodeError:
+                        logger.warning(f"Failed to parse activity_json for id {activity_id}")
+
+            logger.info(f"Backfilled elevation_gain_m for {updated} activities")
+
+
 def init_db() -> None:
     """Create database and tables if they don't exist."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with get_db() as db:
         db.executescript(_SCHEMA)
     migrate_add_last_synced()
+    migrate_add_elevation_gain()
 
 
 @contextmanager
@@ -154,15 +186,19 @@ def upsert_activities(user_name: str, activities: list[dict]) -> int:
             # Parse start time
             start_time = a.get("startTimeLocal") or a.get("startTimeGMT")
 
+            # Extract elevation gain
+            elevation_gain = a.get("elevationGain", 0) or 0
+
             cursor = db.execute(
                 """
                 INSERT INTO cached_activities
-                    (user_name, garmin_id, activity_type, distance_m, duration_s,
-                     calories, start_time, activity_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (user_name, garmin_id, activity_type, distance_m, elevation_gain_m,
+                     duration_s, calories, start_time, activity_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_name, garmin_id) DO UPDATE SET
                     activity_type = excluded.activity_type,
                     distance_m    = excluded.distance_m,
+                    elevation_gain_m = excluded.elevation_gain_m,
                     duration_s    = excluded.duration_s,
                     calories      = excluded.calories,
                     start_time    = excluded.start_time,
@@ -174,6 +210,7 @@ def upsert_activities(user_name: str, activities: list[dict]) -> int:
                     garmin_id,
                     a.get("activityType", {}).get("typeKey", "unknown"),
                     a.get("distance", 0) or 0,
+                    elevation_gain,
                     a.get("duration", 0) or 0,
                     a.get("calories", 0) or 0,
                     start_time,

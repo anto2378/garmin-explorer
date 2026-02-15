@@ -79,12 +79,25 @@ def generate_fake_activity(
     duration_s = distance_km * pace_min_per_km * 60
     calories = int(distance_km * random.uniform(60, 80))  # ~60-80 cal/km
 
+    # Generate realistic elevation gain based on activity type
+    if activity_type == "running":
+        elevation_gain = random.uniform(0, 150)  # 0-150m for runs
+    elif activity_type == "cycling":
+        elevation_gain = random.uniform(50, 500)  # More elevation for cycling
+    elif activity_type == "hiking":
+        elevation_gain = random.uniform(100, 800)  # Significant for hiking
+    elif activity_type == "walking":
+        elevation_gain = random.uniform(0, 100)
+    else:  # swimming
+        elevation_gain = 0  # No elevation in pool
+
     return {
         "activityId": activity_id,
         "activityType": {"typeKey": activity_type},
         "distance": distance_m,
         "duration": duration_s,
         "calories": calories,
+        "elevationGain": elevation_gain,
         "startTimeLocal": start_time.isoformat(),
         "startTimeGMT": start_time.isoformat(),
     }
