@@ -135,8 +135,8 @@ def format_duration(seconds: float) -> str:
     return f"{minutes}m {secs}s"
 
 
-def calculate_equivalent_distance(distance_m: float, elevation_gain_m: float) -> float:
-    """Calculate equivalent distance: distance + (elevation / 100)."""
+def calculate_effort_distance(distance_m: float, elevation_gain_m: float) -> float:
+    """Calculate effort distance: distance + (elevation / 100)."""
     return (distance_m / 1000) + (elevation_gain_m / 100)
 
 
@@ -225,45 +225,49 @@ with main_col:
         user = user_info["name"]
         user_activities = [a for a in running_activities if a["user_name"] == user]
 
-        # Calculate both regular distance and equivalent distance
+        # Calculate both regular distance and effort distance
         total_distance_km = sum((a.get("distance_m") or 0) / 1000 for a in user_activities)
-        total_equiv_km = sum(
-            calculate_equivalent_distance(
+        total_effort_km = sum(
+            calculate_effort_distance(
                 a.get("distance_m") or 0,
                 a.get("elevation_gain_m") or 0
             )
             for a in user_activities
         )
+        total_steps = sum((a.get("steps") or 0) for a in user_activities)
 
         user_progress[user] = {
             "display_name": user_info["display_name"] or user.capitalize(),
             "distance_km": total_distance_km,
-            "equivalent_km": total_equiv_km,
+            "effort_km": total_effort_km,
+            "steps": total_steps,
         }
 
     # Display per-user stats without progress bars
     for user, data in sorted(user_progress.items()):
-        remaining = max(0, TARGET_KM - data["equivalent_km"])
+        remaining = max(0, TARGET_KM - data["effort_km"])
         st.markdown(
             f"**{data['display_name']}**: {data['distance_km']:.0f} / 700 km "
-            f"({data['equivalent_km']:.0f} km eq) — {remaining:.0f} km remaining"
+            f"({data['effort_km']:.0f} km_effort) — {remaining:.0f} km remaining | "
+            f"👣 {data['steps']:,} steps"
         )
 
     st.markdown("")
 
     # Group summary with progress bar
     total_group_distance = sum(d["distance_km"] for d in user_progress.values())
-    total_group_equiv = sum(d["equivalent_km"] for d in user_progress.values())
+    total_group_effort = sum(d["effort_km"] for d in user_progress.values())
+    total_group_steps = sum(d["steps"] for d in user_progress.values())
     group_target = TARGET_KM * len(users)
-    group_remaining = max(0, group_target - total_group_equiv)
+    group_remaining = max(0, group_target - total_group_effort)
 
-    progress_val = min(1.0, total_group_equiv / group_target)
+    progress_val = min(1.0, total_group_effort / group_target)
     st.progress(progress_val)
 
     st.caption(
         f"💪 **Group Total**: {total_group_distance:.0f} km "
-        f"({total_group_equiv:.0f} km eq) of {group_target:.0f} km target — "
-        f"{group_remaining:.0f} km remaining"
+        f"({total_group_effort:.0f} km_effort) of {group_target:.0f} km target — "
+        f"{group_remaining:.0f} km remaining | 👣 {total_group_steps:,} steps"
     )
 
 st.markdown("---")
@@ -273,7 +277,7 @@ st.markdown("### 📊 This Week (Starting Monday)")
 
 current_week_start = get_current_monday().strftime("%Y-%m-%d")
 weekly_data = defaultdict(
-    lambda: {"distance": 0, "equivalent_distance": 0, "duration": 0, "activities": 0, "calories": 0}
+    lambda: {"distance": 0, "effort_distance": 0, "duration": 0, "activities": 0, "active_calories": 0}
 )
 
 for activity in all_activities:
@@ -283,15 +287,15 @@ for activity in all_activities:
     if week == current_week_start:
         user = activity["user_name"]
         distance_km = (activity["distance_m"] or 0) / 1000
-        equiv_km = calculate_equivalent_distance(
+        effort_km = calculate_effort_distance(
             activity.get("distance_m") or 0,
             activity.get("elevation_gain_m") or 0
         )
         weekly_data[user]["distance"] += distance_km
-        weekly_data[user]["equivalent_distance"] += equiv_km
+        weekly_data[user]["effort_distance"] += effort_km
         weekly_data[user]["duration"] += activity["duration_s"] or 0
         weekly_data[user]["activities"] += 1
-        weekly_data[user]["calories"] += activity["calories"] or 0
+        weekly_data[user]["active_calories"] += activity.get("active_calories") or 0
 
 # Display metric cards
 cols = st.columns(len(users))
@@ -303,10 +307,10 @@ for idx, user_info in enumerate(users):
     with cols[idx]:
         st.metric(
             label=f"🏃 {display_name}",
-            value=f"{data['distance']:.1f} km ({data['equivalent_distance']:.1f} km eq)",
+            value=f"{data['distance']:.1f} km ({data['effort_distance']:.1f} km_effort)",
             delta=f"{data['activities']} activities",
         )
-        st.caption(f"⏱️ {format_duration(data['duration'])} | 🔥 {data['calories']} cal")
+        st.caption(f"⏱️ {format_duration(data['duration'])} | 🔥 {data['active_calories']} cal")
 
 st.markdown("---")
 
@@ -396,7 +400,7 @@ st.markdown("---")
 st.markdown("### 📅 Monthly Recap (Jan - May 2026)")
 
 monthly_data = defaultdict(
-    lambda: defaultdict(lambda: {"distance": 0, "equivalent_distance": 0, "activities": 0, "duration": 0})
+    lambda: defaultdict(lambda: {"distance": 0, "effort_distance": 0, "activities": 0, "duration": 0})
 )
 
 # Compute monthly data
@@ -407,12 +411,12 @@ for activity in all_activities:
     if month.startswith("2026"):
         user = activity["user_name"]
         distance_km = (activity["distance_m"] or 0) / 1000
-        equiv_km = calculate_equivalent_distance(
+        effort_km = calculate_effort_distance(
             activity.get("distance_m") or 0,
             activity.get("elevation_gain_m") or 0
         )
         monthly_data[month][user]["distance"] += distance_km
-        monthly_data[month][user]["equivalent_distance"] += equiv_km
+        monthly_data[month][user]["effort_distance"] += effort_km
         monthly_data[month][user]["activities"] += 1
         monthly_data[month][user]["duration"] += activity["duration_s"] or 0
 
@@ -430,11 +434,11 @@ for user_info in users:
 
     row = {"Runner": display_name}
 
-    # Add km (with equivalent) and activity count for each month
+    # Add km (with effort) and activity count for each month
     for month_key, month_name in zip(months_to_show, month_names):
         data = monthly_data[month_key][user]
         if data["activities"] > 0:
-            row[f"{month_name} km"] = f"{data['distance']:.1f} ({data['equivalent_distance']:.1f} eq)"
+            row[f"{month_name} km"] = f"{data['distance']:.1f} ({data['effort_distance']:.1f} effort)"
             row[f"{month_name} #"] = data["activities"]
         else:
             row[f"{month_name} km"] = "—"
@@ -470,7 +474,7 @@ for activity in recent_activities:
     # Calculate metrics
     distance_km = (activity["distance_m"] or 0) / 1000
     elevation_gain = activity.get("elevation_gain_m") or 0
-    equivalent_km = distance_km + (elevation_gain / 100)
+    effort_km = distance_km + (elevation_gain / 100)
     duration = format_duration(activity["duration_s"] or 0)
     activity_type = activity["activity_type"].replace("_", " ").title()
 
@@ -480,7 +484,7 @@ for activity in recent_activities:
         "Type": activity_type,
         "Distance": f"{distance_km:.1f} km",
         "Elevation": format_elevation(elevation_gain),
-        "Equiv. Dist": f"{equivalent_km:.1f} km",
+        "Effort Dist": f"{effort_km:.1f} km",
         "Duration": duration,
     })
 

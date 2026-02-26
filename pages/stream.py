@@ -36,8 +36,8 @@ def format_time_ago(dt: datetime) -> str:
         return f"{days}d ago"
 
 
-def calculate_equivalent_distance(distance_m: float, elevation_gain_m: float) -> float:
-    """Calculate equivalent distance: distance + (elevation / 100)."""
+def calculate_effort_distance(distance_m: float, elevation_gain_m: float) -> float:
+    """Calculate effort distance: distance + (elevation / 100)."""
     return (distance_m / 1000) + (elevation_gain_m / 100)
 
 
@@ -168,10 +168,10 @@ for a in filtered_activities:
     dist_m = a.get("distance_m", 0) or 0
     dist_km = dist_m / 1000
 
-    # Elevation and equivalent distance
+    # Elevation and effort distance
     elevation_gain = a.get("elevation_gain_m") or 0
     height_km = elevation_gain / 100
-    equiv_km = dist_km + height_km
+    effort_km = dist_km + height_km
 
     # Duration in minutes
     dur_s = a.get("duration_s", 0) or 0
@@ -192,7 +192,7 @@ for a in filtered_activities:
             "Type": (a.get("activity_type") or "unknown").replace("_", " ").title(),
             "Distance": f"{dist_km:.1f} km" if dist_km > 0 else "—",
             "Elevation": format_elevation(elevation_gain),
-            "Equiv. Dist": f"{equiv_km:.1f} km" if dist_km > 0 else "—",
+            "Effort Dist": f"{effort_km:.1f} km" if dist_km > 0 else "—",
             "Duration": f"{dur_min:.0f} min" if dur_min > 0 else "—",
             "Pace": pace or "—",
             "Calories": a.get("calories", 0) or "—",

@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS cached_activities (
     elevation_gain_m REAL DEFAULT 0,
     duration_s     REAL DEFAULT 0,
     calories       INTEGER DEFAULT 0,
+    active_calories INTEGER DEFAULT 0,
+    steps          INTEGER DEFAULT 0,
     start_time     TEXT,                       -- ISO-8601
     activity_json  TEXT,                       -- full JSON blob
     fetched_at     TEXT NOT NULL DEFAULT (datetime('now')),
@@ -96,6 +98,45 @@ def migrate_add_elevation_gain() -> None:
             logger.info(f"Backfilled elevation_gain_m for {updated} activities")
 
 
+def migrate_add_steps_and_active_calories() -> None:
+    """Add steps and active_calories columns and backfill from activity_json."""
+    with get_db() as db:
+        cursor = db.execute("PRAGMA table_info(cached_activities)")
+        columns = {row[1] for row in cursor.fetchall()}
+
+        # Add steps column
+        if "steps" not in columns:
+            db.execute("ALTER TABLE cached_activities ADD COLUMN steps INTEGER DEFAULT 0")
+            logger.info("Added steps column to cached_activities table")
+
+        # Add active_calories column
+        if "active_calories" not in columns:
+            db.execute("ALTER TABLE cached_activities ADD COLUMN active_calories INTEGER DEFAULT 0")
+            logger.info("Added active_calories column to cached_activities table")
+
+        # Backfill from activity_json
+        if "steps" not in columns or "active_calories" not in columns:
+            rows = db.execute("SELECT id, activity_json FROM cached_activities").fetchall()
+            updated = 0
+            for row in rows:
+                activity_id = row[0]
+                activity_json = row[1]
+                if activity_json:
+                    try:
+                        activity_data = json.loads(activity_json)
+                        steps = activity_data.get("steps", 0) or 0
+                        active_calories = activity_data.get("activeKilocalories", 0) or 0
+                        db.execute(
+                            "UPDATE cached_activities SET steps = ?, active_calories = ? WHERE id = ?",
+                            (steps, active_calories, activity_id)
+                        )
+                        updated += 1
+                    except json.JSONDecodeError:
+                        logger.warning(f"Failed to parse activity_json for id {activity_id}")
+
+            logger.info(f"Backfilled steps and active_calories for {updated} activities")
+
+
 def init_db() -> None:
     """Create database and tables if they don't exist."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -103,6 +144,7 @@ def init_db() -> None:
         db.executescript(_SCHEMA)
     migrate_add_last_synced()
     migrate_add_elevation_gain()
+    migrate_add_steps_and_active_calories()
 
 
 @contextmanager
@@ -186,21 +228,25 @@ def upsert_activities(user_name: str, activities: list[dict]) -> int:
             # Parse start time
             start_time = a.get("startTimeLocal") or a.get("startTimeGMT")
 
-            # Extract elevation gain
+            # Extract fields
             elevation_gain = a.get("elevationGain", 0) or 0
+            steps = a.get("steps", 0) or 0
+            active_calories = a.get("activeKilocalories", 0) or 0
 
             cursor = db.execute(
                 """
                 INSERT INTO cached_activities
                     (user_name, garmin_id, activity_type, distance_m, elevation_gain_m,
-                     duration_s, calories, start_time, activity_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     duration_s, calories, active_calories, steps, start_time, activity_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_name, garmin_id) DO UPDATE SET
                     activity_type = excluded.activity_type,
                     distance_m    = excluded.distance_m,
                     elevation_gain_m = excluded.elevation_gain_m,
                     duration_s    = excluded.duration_s,
                     calories      = excluded.calories,
+                    active_calories = excluded.active_calories,
+                    steps         = excluded.steps,
                     start_time    = excluded.start_time,
                     activity_json = excluded.activity_json,
                     fetched_at    = datetime('now')
@@ -213,6 +259,8 @@ def upsert_activities(user_name: str, activities: list[dict]) -> int:
                     elevation_gain,
                     a.get("duration", 0) or 0,
                     a.get("calories", 0) or 0,
+                    active_calories,
+                    steps,
                     start_time,
                     json.dumps(a),
                 ),

@@ -78,6 +78,7 @@ def generate_fake_activity(
     distance_m = distance_km * 1000
     duration_s = distance_km * pace_min_per_km * 60
     calories = int(distance_km * random.uniform(60, 80))  # ~60-80 cal/km
+    active_calories = int(calories * random.uniform(0.80, 0.90))  # 80-90% of total
 
     # Generate realistic elevation gain based on activity type
     if activity_type == "running":
@@ -91,12 +92,21 @@ def generate_fake_activity(
     else:  # swimming
         elevation_gain = 0  # No elevation in pool
 
+    # Generate steps (roughly 1300-1500 steps/km for running/walking)
+    if activity_type in ["running", "walking", "hiking"]:
+        steps_per_km = random.uniform(1300, 1500)
+        steps = int(distance_km * steps_per_km)
+    else:
+        steps = 0  # No steps for cycling/swimming
+
     return {
         "activityId": activity_id,
         "activityType": {"typeKey": activity_type},
         "distance": distance_m,
         "duration": duration_s,
         "calories": calories,
+        "activeKilocalories": active_calories,
+        "steps": steps,
         "elevationGain": elevation_gain,
         "startTimeLocal": start_time.isoformat(),
         "startTimeGMT": start_time.isoformat(),
