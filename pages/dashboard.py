@@ -12,6 +12,7 @@ Features:
 from collections import defaultdict
 from datetime import datetime, timedelta
 
+import plotly.graph_objects as go
 import streamlit as st
 
 from lib.database import get_all_users, get_cached_activities
@@ -269,6 +270,63 @@ with main_col:
         f"({total_group_effort:.0f} km_effort) of {group_target:.0f} km target — "
         f"{group_remaining:.0f} km remaining | 👣 {total_group_steps:,} steps"
     )
+
+st.markdown("---")
+
+# --- Cumulative Distance Over Time ---
+st.markdown("### 📈 Cumulative Running Distance")
+
+# Build per-user cumulative series from running activities
+user_colors = ["#ff4b4b", "#4b9eff", "#4bff91", "#ffcc4b", "#cc4bff"]
+cumulative_fig = go.Figure()
+
+sorted_users = sorted(users, key=lambda u: u["name"])
+
+for idx, user_info in enumerate(sorted_users):
+    user = user_info["name"]
+    display_name = user_info["display_name"] or user.capitalize()
+    color = user_colors[idx % len(user_colors)]
+
+    user_running = [
+        a for a in running_activities
+        if a["user_name"] == user and a.get("start_time")
+    ]
+    # Sort ascending by date
+    user_running.sort(key=lambda a: a["start_time"])
+
+    if not user_running:
+        continue
+
+    dates = []
+    cumulative_km = []
+    running_total = 0.0
+    for a in user_running:
+        running_total += (a.get("distance_m") or 0) / 1000
+        dates.append(a["start_time"][:10])  # YYYY-MM-DD
+        cumulative_km.append(running_total)
+
+    cumulative_fig.add_trace(
+        go.Scatter(
+            x=dates,
+            y=cumulative_km,
+            mode="lines+markers",
+            name=display_name,
+            line=dict(color=color, width=2),
+            marker=dict(size=4),
+            hovertemplate="%{x}<br><b>%{y:.1f} km</b><extra>" + display_name + "</extra>",
+        )
+    )
+
+cumulative_fig.update_layout(
+    template="plotly_dark",
+    height=380,
+    margin=dict(l=0, r=0, t=10, b=0),
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+    xaxis_title=None,
+    yaxis_title="Cumulative km",
+    hovermode="x unified",
+)
+st.plotly_chart(cumulative_fig, use_container_width=True)
 
 st.markdown("---")
 

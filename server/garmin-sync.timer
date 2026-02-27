@@ -1,9 +1,9 @@
 [Unit]
-Description=Daily Garmin Sync Timer (3 AM local time)
+Description=Garmin Sync Timer (3 AM, 9 AM, 3 PM, 9 PM)
 Requires=garmin-sync.service
 
 [Timer]
-OnCalendar=*-*-* 03:00:00
+OnCalendar=*-*-* 03,09,15,21:00:00
 Persistent=true
 AccuracySec=5m
 
