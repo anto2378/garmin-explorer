@@ -146,6 +146,12 @@ def format_elevation(elevation_m: float) -> str:
     return f"{int(elevation_m)}m" if elevation_m > 0 else "—"
 
 
+def get_7_days_ago() -> datetime:
+    """Get datetime 7 days ago at midnight."""
+    today = datetime.now()
+    return (today - timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
 def get_current_monday() -> datetime:
     """Get the Monday of the current week."""
     today = datetime.now()
@@ -330,45 +336,79 @@ st.plotly_chart(cumulative_fig, use_container_width=True)
 
 st.markdown("---")
 
-# --- Weekly Stats (Current Week) ---
+# --- Weekly Stats (Current Week + Last 7 Days) ---
 st.markdown("### 📊 This Week (Starting Monday)")
 
 current_week_start = get_current_monday().strftime("%Y-%m-%d")
+seven_days_ago = get_7_days_ago()
+
 weekly_data = defaultdict(
-    lambda: {"distance": 0, "effort_distance": 0, "duration": 0, "activities": 0, "active_calories": 0}
+    lambda: {"distance": 0, "effort_distance": 0, "duration": 0, "activities": 0,
+             "active_calories": 0, "intense_minutes": 0}
+)
+rolling_data: dict = defaultdict(
+    lambda: {"distance": 0, "effort_distance": 0, "duration": 0, "activities": 0,
+             "active_calories": 0, "intense_minutes": 0}
 )
 
 for activity in all_activities:
     if activity["activity_type"] not in RUNNING_TYPES:
         continue
+    try:
+        act_dt = datetime.fromisoformat(activity["start_time"].replace("Z", "+00:00")).replace(tzinfo=None)
+    except (ValueError, TypeError):
+        continue
+
+    user = activity["user_name"]
+    distance_km = (activity["distance_m"] or 0) / 1000
+    effort_km = calculate_effort_distance(
+        activity.get("distance_m") or 0,
+        activity.get("elevation_gain_m") or 0,
+    )
+    dur = activity["duration_s"] or 0
+    acal = activity.get("active_calories") or 0
+    imin = activity.get("intense_minutes") or 0
+
     week = get_week_start(activity["start_time"])
     if week == current_week_start:
-        user = activity["user_name"]
-        distance_km = (activity["distance_m"] or 0) / 1000
-        effort_km = calculate_effort_distance(
-            activity.get("distance_m") or 0,
-            activity.get("elevation_gain_m") or 0
-        )
         weekly_data[user]["distance"] += distance_km
         weekly_data[user]["effort_distance"] += effort_km
-        weekly_data[user]["duration"] += activity["duration_s"] or 0
+        weekly_data[user]["duration"] += dur
         weekly_data[user]["activities"] += 1
-        weekly_data[user]["active_calories"] += activity.get("active_calories") or 0
+        weekly_data[user]["active_calories"] += acal
+        weekly_data[user]["intense_minutes"] += imin
+
+    if act_dt >= seven_days_ago:
+        rolling_data[user]["distance"] += distance_km
+        rolling_data[user]["effort_distance"] += effort_km
+        rolling_data[user]["duration"] += dur
+        rolling_data[user]["activities"] += 1
+        rolling_data[user]["active_calories"] += acal
+        rolling_data[user]["intense_minutes"] += imin
 
 # Display metric cards
 cols = st.columns(len(users))
 for idx, user_info in enumerate(users):
     user = user_info["name"]
     display_name = user_info["display_name"] or user.capitalize()
-    data = weekly_data[user]
+    w = weekly_data[user]
+    r = rolling_data[user]
 
     with cols[idx]:
         st.metric(
             label=f"🏃 {display_name}",
-            value=f"{data['distance']:.1f} km ({data['effort_distance']:.1f} km_effort)",
-            delta=f"{data['activities']} activities",
+            value=f"{w['distance']:.1f} km ({w['effort_distance']:.1f} km_effort)",
+            delta=f"{w['activities']} activities",
         )
-        st.caption(f"⏱️ {format_duration(data['duration'])} | 🔥 {data['active_calories']} cal")
+        st.caption(
+            f"⏱️ {format_duration(w['duration'])} | "
+            f"🔥 {w['active_calories']} kcal | "
+            f"⚡ {w['intense_minutes']} intense min"
+        )
+        st.caption(
+            f"_Last 7d: {r['distance']:.1f} km · {r['activities']} runs · "
+            f"{r['active_calories']} kcal · {r['intense_minutes']} intense min_"
+        )
 
 st.markdown("---")
 

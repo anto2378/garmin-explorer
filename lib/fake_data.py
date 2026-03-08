@@ -99,13 +99,19 @@ def generate_fake_activity(
     else:
         steps = 0  # No steps for cycling/swimming
 
+    bmr_calories = int(calories * random.uniform(0.10, 0.20))
+    moderate_minutes = random.randint(5, 20) if activity_type in ["running", "walking", "hiking"] else 0
+    vigorous_minutes = random.randint(10, 40) if activity_type == "running" else 0
+
     return {
         "activityId": activity_id,
         "activityType": {"typeKey": activity_type},
         "distance": distance_m,
         "duration": duration_s,
         "calories": calories,
-        "activeKilocalories": active_calories,
+        "bmrCalories": bmr_calories,
+        "moderateIntensityMinutes": moderate_minutes,
+        "vigorousIntensityMinutes": vigorous_minutes,
         "steps": steps,
         "elevationGain": elevation_gain,
         "startTimeLocal": start_time.isoformat(),
