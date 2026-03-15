@@ -114,42 +114,61 @@ with filter_col2:
 with filter_col3:
     filter_year = st.button("2026 year", use_container_width=True)
 
+# Activity type filter
+all_types = sorted({(a.get("activity_type") or "unknown") for a in activities})
+all_types_display = {t.replace("_", " ").title(): t for t in all_types}
+
+type_col1, type_col2, type_col3 = st.columns([4, 1, 1])
+with type_col2:
+    if st.button("All", use_container_width=True):
+        st.session_state["type_filter"] = list(all_types_display.keys())
+        st.rerun()
+with type_col3:
+    if st.button("None", use_container_width=True):
+        st.session_state["type_filter"] = []
+        st.rerun()
+with type_col1:
+    selected_display = st.multiselect(
+        "Activity types",
+        key="type_filter",
+        options=list(all_types_display.keys()),
+        default=list(all_types_display.keys()),
+        label_visibility="collapsed",
+    )
+
+selected_types = {all_types_display[d] for d in selected_display}
+
 # Apply filters
 now = datetime.now()
-filtered_activities = activities
+filtered_activities = [
+    a for a in activities if (a.get("activity_type") or "unknown") in selected_types
+]
 
 if filter_week:
-    # Get Monday of current week
     monday = now - timedelta(days=now.weekday())
     monday = monday.replace(hour=0, minute=0, second=0, microsecond=0)
     filtered_activities = [
         a
-        for a in activities
+        for a in filtered_activities
         if a.get("start_time")
         and datetime.fromisoformat(a["start_time"].replace("Z", "+00:00")) >= monday
     ]
 elif filter_month:
-    # Get first day of current month
     first_day = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     filtered_activities = [
         a
-        for a in activities
+        for a in filtered_activities
         if a.get("start_time")
         and datetime.fromisoformat(a["start_time"].replace("Z", "+00:00")) >= first_day
     ]
 elif filter_year:
-    # Get all 2026 activities
     filtered_activities = [
         a
-        for a in activities
+        for a in filtered_activities
         if a.get("start_time") and a["start_time"].startswith("2026")
     ]
 
-# Show filter info if active
-if filter_week or filter_month or filter_year:
-    st.caption(f"Showing {len(filtered_activities)} of {len(activities)} activities")
-else:
-    st.caption("Showing all activities")
+st.caption(f"Showing {len(filtered_activities)} of {len(activities)} activities")
 
 st.markdown("")
 
@@ -190,12 +209,12 @@ for a in filtered_activities:
             "When": date_str,
             "Who": a.get("user_name", "?").title(),
             "Type": (a.get("activity_type") or "unknown").replace("_", " ").title(),
-            "Distance": f"{dist_km:.1f} km" if dist_km > 0 else "—",
-            "Elevation": format_elevation(elevation_gain),
-            "Effort Dist": f"{effort_km:.1f} km" if dist_km > 0 else "—",
-            "Duration": f"{dur_min:.0f} min" if dur_min > 0 else "—",
-            "Pace": pace or "—",
-            "Calories": a.get("calories", 0) or "—",
+            "Distance [km]": round(dist_km, 1) if dist_km > 0 else None,
+            "Elevation [m]": int(elevation_gain) if elevation_gain > 0 else None,
+            "Effort Dist [km]": round(effort_km, 1) if dist_km > 0 else None,
+            "Duration [min]": round(dur_min) if dur_min > 0 else None,
+            "Pace [/km]": pace or None,
+            "Calories": a.get("calories", 0) or None,
         }
     )
 

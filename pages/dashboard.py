@@ -15,7 +15,9 @@ from datetime import datetime, timedelta
 import plotly.graph_objects as go
 import streamlit as st
 
+from lib.cache import sync_all_users
 from lib.database import get_all_users, get_cached_activities
+from lib.garmin import TOKENS_DIR
 
 
 def format_time_ago(dt: datetime) -> str:
@@ -24,6 +26,7 @@ def format_time_ago(dt: datetime) -> str:
     # Handle timezone-aware datetimes
     if dt.tzinfo is not None:
         from datetime import timezone
+
         now = now.replace(tzinfo=timezone.utc)
 
     delta = now - dt
@@ -46,6 +49,7 @@ def format_time_ago(dt: datetime) -> str:
 MARATHON_DATE = datetime(2026, 5, 12)
 TRAINING_START_DATE = datetime(2025, 11, 13)  # 180 days before race
 RUNNING_TYPES = {"running", "treadmill_running"}
+TRAINING_TYPES = {"running", "treadmill_running", "backcountry_skiing"}
 
 st.title("🏠 Dashboard")
 
@@ -102,6 +106,27 @@ with left_col:
         else:
             st.caption(f"🟡 {display_name}: Never")
 
+    # Sync button
+    connected = []
+    if TOKENS_DIR.exists():
+        connected = [
+            d.name
+            for d in sorted(TOKENS_DIR.iterdir())
+            if d.is_dir() and any(d.iterdir())
+        ]
+    if connected:
+        if st.button("🔄 Sync now", use_container_width=True):
+            with st.spinner("Fetching activities from Garmin..."):
+                results = sync_all_users(connected)
+            for r in results:
+                if "error" in r:
+                    st.error(f"❌ {r['user'].title()}: {r['error']}")
+                else:
+                    st.success(
+                        f"✅ {r['display_name']}: {r['new']} new"
+                    )
+            st.rerun()
+
 with main_col:
     # --- Fetch all activities ---
     all_activities = get_cached_activities(limit=1000)
@@ -141,15 +166,22 @@ def calculate_effort_distance(distance_m: float, elevation_gain_m: float) -> flo
     return (distance_m / 1000) + (elevation_gain_m / 100)
 
 
+def calculate_training_effort(activity: dict) -> float:
+    """Calculate effort km accounting for activity type.
+
+    Running: distance + elevation/100
+    Backcountry skiing: half distance + half elevation/100 (only uphill counts)
+    """
+    distance_m = activity.get("distance_m") or 0
+    elevation_m = activity.get("elevation_gain_m") or 0
+    if activity.get("activity_type") == "backcountry_skiing":
+        return (distance_m / 1000 / 2) + (elevation_m / 100)
+    return (distance_m / 1000) + (elevation_m / 100)
+
+
 def format_elevation(elevation_m: float) -> str:
     """Format elevation as meters with unit."""
     return f"{int(elevation_m)}m" if elevation_m > 0 else "—"
-
-
-def get_7_days_ago() -> datetime:
-    """Get datetime 7 days ago at midnight."""
-    today = datetime.now()
-    return (today - timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 def get_current_monday() -> datetime:
@@ -189,12 +221,15 @@ with main_col:
     )
 
     # Filter for running activities only
-    running_activities = [a for a in all_activities if a["activity_type"] in RUNNING_TYPES]
+    running_activities = [
+        a for a in all_activities if a["activity_type"] in RUNNING_TYPES
+    ]
 
     total_distance = sum((a["distance_m"] or 0) for a in running_activities) / 1000
     total_activities = len(running_activities)
     total_duration = sum((a["duration_s"] or 0) for a in running_activities)
     total_calories = sum((a["calories"] or 0) for a in running_activities)
+    total_steps = sum((a.get("steps") or 0) for a in running_activities)
 
     # Extract unique activity types from running activities
     activity_types = defaultdict(int)
@@ -209,11 +244,12 @@ with main_col:
         most_common_name = "N/A"
         most_common_count = 0
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("🏃 Total Distance", f"{total_distance:.1f} km")
     col2.metric("📊 Total Activities", f"{total_activities}")
     col3.metric("⏱️ Total Time", f"{format_duration(total_duration)}")
     col4.metric("🔥 Total Calories", f"{total_calories:,}")
+    col5.metric("👣 Total Steps", f"{total_steps:,}")
 
     st.caption(
         f"🏃 Running activities only • Most popular: **{most_common_name}** ({most_common_count} times)"
@@ -222,60 +258,76 @@ with main_col:
     st.markdown("")
     st.markdown("---")
 
-    # --- Per-Person Cumulative Target ---
+    # --- Per-Person Target Bar Chart ---
     st.markdown("### 🎯 Training KM Target")
 
     TARGET_KM = 700
-    user_progress = {}
 
-    for user_info in users:
+    names = []
+    distances = []
+    efforts = []
+
+    for user_info in sorted(users, key=lambda u: u["name"]):
         user = user_info["name"]
+        display_name = user_info["display_name"] or user.capitalize()
         user_activities = [a for a in running_activities if a["user_name"] == user]
 
-        # Calculate both regular distance and effort distance
-        total_distance_km = sum((a.get("distance_m") or 0) / 1000 for a in user_activities)
-        total_effort_km = sum(
+        dist_km = sum((a.get("distance_m") or 0) / 1000 for a in user_activities)
+        effort_km = sum(
             calculate_effort_distance(
-                a.get("distance_m") or 0,
-                a.get("elevation_gain_m") or 0
+                a.get("distance_m") or 0, a.get("elevation_gain_m") or 0
             )
             for a in user_activities
         )
-        total_steps = sum((a.get("steps") or 0) for a in user_activities)
 
-        user_progress[user] = {
-            "display_name": user_info["display_name"] or user.capitalize(),
-            "distance_km": total_distance_km,
-            "effort_km": total_effort_km,
-            "steps": total_steps,
-        }
+        names.append(display_name)
+        distances.append(dist_km)
+        efforts.append(effort_km)
 
-    # Display per-user stats without progress bars
-    for user, data in sorted(user_progress.items()):
-        remaining = max(0, TARGET_KM - data["effort_km"])
-        st.markdown(
-            f"**{data['display_name']}**: {data['distance_km']:.0f} / 700 km "
-            f"({data['effort_km']:.0f} km_effort) — {remaining:.0f} km remaining | "
-            f"👣 {data['steps']:,} steps"
+    target_bar_fig = go.Figure()
+
+    target_bar_fig.add_trace(
+        go.Bar(
+            x=names,
+            y=distances,
+            name="Distance",
+            marker_color="#4b9eff",
+            text=[f"{d:.0f}" for d in distances],
+            textposition="auto",
         )
-
-    st.markdown("")
-
-    # Group summary with progress bar
-    total_group_distance = sum(d["distance_km"] for d in user_progress.values())
-    total_group_effort = sum(d["effort_km"] for d in user_progress.values())
-    total_group_steps = sum(d["steps"] for d in user_progress.values())
-    group_target = TARGET_KM * len(users)
-    group_remaining = max(0, group_target - total_group_effort)
-
-    progress_val = min(1.0, total_group_effort / group_target)
-    st.progress(progress_val)
-
-    st.caption(
-        f"💪 **Group Total**: {total_group_distance:.0f} km "
-        f"({total_group_effort:.0f} km_effort) of {group_target:.0f} km target — "
-        f"{group_remaining:.0f} km remaining | 👣 {total_group_steps:,} steps"
     )
+    target_bar_fig.add_trace(
+        go.Bar(
+            x=names,
+            y=efforts,
+            name="Effort Distance",
+            marker_color="#4bff91",
+            text=[f"{e:.0f}" for e in efforts],
+            textposition="auto",
+        )
+    )
+
+    # Target line
+    target_bar_fig.add_hline(
+        y=TARGET_KM,
+        line_dash="dash",
+        line_color="#ff4b4b",
+        line_width=2,
+        annotation_text=f"Target: {TARGET_KM} km",
+        annotation_position="top left",
+        annotation_font_color="#ff4b4b",
+    )
+
+    target_bar_fig.update_layout(
+        template="plotly_dark",
+        height=350,
+        margin=dict(l=0, r=0, t=10, b=0),
+        barmode="group",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        yaxis_title="km",
+        yaxis=dict(range=[0, TARGET_KM * 1.1]),
+    )
+    st.plotly_chart(target_bar_fig, use_container_width=True)
 
 st.markdown("---")
 
@@ -294,8 +346,7 @@ for idx, user_info in enumerate(sorted_users):
     color = user_colors[idx % len(user_colors)]
 
     user_running = [
-        a for a in running_activities
-        if a["user_name"] == user and a.get("start_time")
+        a for a in running_activities if a["user_name"] == user and a.get("start_time")
     ]
     # Sort ascending by date
     user_running.sort(key=lambda a: a["start_time"])
@@ -319,7 +370,9 @@ for idx, user_info in enumerate(sorted_users):
             name=display_name,
             line=dict(color=color, width=2),
             marker=dict(size=4),
-            hovertemplate="%{x}<br><b>%{y:.1f} km</b><extra>" + display_name + "</extra>",
+            hovertemplate="%{x}<br><b>%{y:.1f} km</b><extra>"
+            + display_name
+            + "</extra>",
         )
     )
 
@@ -336,87 +389,180 @@ st.plotly_chart(cumulative_fig, use_container_width=True)
 
 st.markdown("---")
 
-# --- Weekly Stats (Current Week + Last 7 Days) ---
+# --- Jeff's Cumulative Distance (Running + Backcountry Skiing, effort km) ---
+st.markdown("### ⛷️ Jeff's Cumulative Distance")
+st.caption("Running + Backcountry Skiing • Skiing counts half distance (uphill only) + full elevation")
+
+training_activities = [
+    a for a in all_activities if a["activity_type"] in TRAINING_TYPES
+]
+
+jeff_fig = go.Figure()
+jeff_colors = ["#ff4b4b", "#4b9eff", "#4bff91", "#ffcc4b", "#cc4bff"]
+
+for idx, user_info in enumerate(sorted(users, key=lambda u: u["name"])):
+    user = user_info["name"]
+    display_name = user_info["display_name"] or user.capitalize()
+    color = jeff_colors[idx % len(jeff_colors)]
+
+    user_training = [
+        a for a in training_activities if a["user_name"] == user and a.get("start_time")
+    ]
+    user_training.sort(key=lambda a: a["start_time"])
+
+    if not user_training:
+        continue
+
+    dates = []
+    cumulative_effort = []
+    running_total = 0.0
+    for a in user_training:
+        running_total += calculate_training_effort(a)
+        dates.append(a["start_time"][:10])
+        cumulative_effort.append(running_total)
+
+    jeff_fig.add_trace(
+        go.Scatter(
+            x=dates,
+            y=cumulative_effort,
+            mode="lines+markers",
+            name=display_name,
+            line=dict(color=color, width=2),
+            marker=dict(size=4),
+            hovertemplate="%{x}<br><b>%{y:.1f} km effort</b><extra>"
+            + display_name
+            + "</extra>",
+        )
+    )
+
+jeff_fig.update_layout(
+    template="plotly_dark",
+    height=380,
+    margin=dict(l=0, r=0, t=10, b=0),
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+    xaxis_title=None,
+    yaxis_title="Cumulative effort km",
+    hovermode="x unified",
+)
+st.plotly_chart(jeff_fig, use_container_width=True)
+
+st.markdown("---")
+
+# --- Cumulative Active Calories ---
+st.markdown("### 🔥 Cumulative Active Calories")
+st.caption("Calories burned during activities only (excludes resting/BMR) • All activity types")
+
+cal_fig = go.Figure()
+cal_colors = ["#ff4b4b", "#4b9eff", "#4bff91", "#ffcc4b", "#cc4bff"]
+
+for idx, user_info in enumerate(sorted(users, key=lambda u: u["name"])):
+    user = user_info["name"]
+    display_name = user_info["display_name"] or user.capitalize()
+    color = cal_colors[idx % len(cal_colors)]
+
+    user_acts = [
+        a for a in all_activities if a["user_name"] == user and a.get("start_time")
+    ]
+    user_acts.sort(key=lambda a: a["start_time"])
+
+    if not user_acts:
+        continue
+
+    dates = []
+    cumulative_cal = []
+    total_cal = 0
+    for a in user_acts:
+        total_cal += a.get("active_calories") or 0
+        dates.append(a["start_time"][:10])
+        cumulative_cal.append(total_cal)
+
+    cal_fig.add_trace(
+        go.Scatter(
+            x=dates,
+            y=cumulative_cal,
+            mode="lines+markers",
+            name=display_name,
+            line=dict(color=color, width=2),
+            marker=dict(size=4),
+            hovertemplate="%{x}<br><b>%{y:,.0f} cal</b><extra>"
+            + display_name
+            + "</extra>",
+        )
+    )
+
+cal_fig.update_layout(
+    template="plotly_dark",
+    height=380,
+    margin=dict(l=0, r=0, t=10, b=0),
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+    xaxis_title=None,
+    yaxis_title="Active calories",
+    hovermode="x unified",
+)
+st.plotly_chart(cal_fig, use_container_width=True)
+
+st.markdown("---")
+
+# --- Weekly Stats (Current Week) ---
 st.markdown("### 📊 This Week (Starting Monday)")
 
 current_week_start = get_current_monday().strftime("%Y-%m-%d")
-seven_days_ago = get_7_days_ago()
-
 weekly_data = defaultdict(
-    lambda: {"distance": 0, "effort_distance": 0, "duration": 0, "activities": 0,
-             "active_calories": 0, "intense_minutes": 0}
-)
-rolling_data: dict = defaultdict(
-    lambda: {"distance": 0, "effort_distance": 0, "duration": 0, "activities": 0,
-             "active_calories": 0, "intense_minutes": 0}
+    lambda: {
+        "distance": 0,
+        "effort_distance": 0,
+        "duration": 0,
+        "activities": 0,
+        "active_calories": 0,
+    }
 )
 
 for activity in all_activities:
     if activity["activity_type"] not in RUNNING_TYPES:
         continue
-    try:
-        act_dt = datetime.fromisoformat(activity["start_time"].replace("Z", "+00:00")).replace(tzinfo=None)
-    except (ValueError, TypeError):
-        continue
-
-    user = activity["user_name"]
-    distance_km = (activity["distance_m"] or 0) / 1000
-    effort_km = calculate_effort_distance(
-        activity.get("distance_m") or 0,
-        activity.get("elevation_gain_m") or 0,
-    )
-    dur = activity["duration_s"] or 0
-    acal = activity.get("active_calories") or 0
-    imin = activity.get("intense_minutes") or 0
-
     week = get_week_start(activity["start_time"])
     if week == current_week_start:
+        user = activity["user_name"]
+        distance_km = (activity["distance_m"] or 0) / 1000
+        effort_km = calculate_effort_distance(
+            activity.get("distance_m") or 0, activity.get("elevation_gain_m") or 0
+        )
         weekly_data[user]["distance"] += distance_km
         weekly_data[user]["effort_distance"] += effort_km
-        weekly_data[user]["duration"] += dur
+        weekly_data[user]["duration"] += activity["duration_s"] or 0
         weekly_data[user]["activities"] += 1
-        weekly_data[user]["active_calories"] += acal
-        weekly_data[user]["intense_minutes"] += imin
-
-    if act_dt >= seven_days_ago:
-        rolling_data[user]["distance"] += distance_km
-        rolling_data[user]["effort_distance"] += effort_km
-        rolling_data[user]["duration"] += dur
-        rolling_data[user]["activities"] += 1
-        rolling_data[user]["active_calories"] += acal
-        rolling_data[user]["intense_minutes"] += imin
+        weekly_data[user]["active_calories"] += activity.get("active_calories") or 0
 
 # Display metric cards
 cols = st.columns(len(users))
 for idx, user_info in enumerate(users):
     user = user_info["name"]
     display_name = user_info["display_name"] or user.capitalize()
-    w = weekly_data[user]
-    r = rolling_data[user]
+    data = weekly_data[user]
 
     with cols[idx]:
         st.metric(
             label=f"🏃 {display_name}",
-            value=f"{w['distance']:.1f} km ({w['effort_distance']:.1f} km_effort)",
-            delta=f"{w['activities']} activities",
+            value=f"{data['distance']:.1f} km ({data['effort_distance']:.1f} km_effort)",
+            delta=f"{data['activities']} activities",
         )
         st.caption(
-            f"⏱️ {format_duration(w['duration'])} | "
-            f"🔥 {w['active_calories']} kcal | "
-            f"⚡ {w['intense_minutes']} intense min"
-        )
-        st.caption(
-            f"_Last 7d: {r['distance']:.1f} km · {r['activities']} runs · "
-            f"{r['active_calories']} kcal · {r['intense_minutes']} intense min_"
+            f"⏱️ {format_duration(data['duration'])} | 🔥 {data['active_calories']} cal"
         )
 
 st.markdown("---")
 
-# --- Last 8 Weeks Trend (Monday-based) ---
-st.markdown("### 📈 Weekly Distance (Last 8 Weeks - Monday to Sunday)")
+# --- Weekly Distance Trend (Monday-based, from Jan 2026) ---
+st.markdown("### 📈 Weekly Distance (Monday to Sunday)")
 
-# Get last 8 Monday dates
-week_labels = get_last_n_mondays(8)
+# Build all Monday dates from Jan 5 2026 (first Monday) to current week
+jan1_monday = datetime(2026, 1, 5)  # First Monday of 2026
+current_monday = get_current_monday()
+week_labels = []
+m = jan1_monday
+while m <= current_monday:
+    week_labels.append(m.strftime("%Y-%m-%d"))
+    m += timedelta(weeks=1)
 
 # Compute weekly data
 weeks_data = defaultdict(lambda: defaultdict(float))
@@ -429,34 +575,17 @@ for activity in all_activities:
         user = activity["user_name"]
         weeks_data[week][user] += (activity["distance_m"] or 0) / 1000
 
-# Create DataFrame for st.bar_chart (wide format)
 import pandas as pd
-
-chart_data = {}
+import altair as alt
 
 # Convert week dates to week numbers (ISO 8601 format: YYYY-Wxx)
 week_numbers = []
 for week_date in week_labels:
     dt = datetime.strptime(week_date, "%Y-%m-%d")
     iso_year, iso_week, _ = dt.isocalendar()
-    week_numbers.append(f"{iso_year}-W{iso_week:02d}")
+    week_numbers.append(f"W{iso_week:02d}")
 
-chart_data["Week"] = week_numbers
-
-# Add each user as a column
 colors = ["#FF4B4B", "#0068C9", "#83C9FF", "#FF9B00", "#29B09D", "#7D3AC1", "#DB4CB2"]
-user_colors = []
-
-for idx, user_info in enumerate(users):
-    user = user_info["name"]
-    display_name = user_info["display_name"] or user.capitalize()
-    chart_data[display_name] = [weeks_data[week][user] for week in week_labels]
-    user_colors.append(colors[idx % len(colors)])
-
-df = pd.DataFrame(chart_data)
-
-# Create grouped bar chart with Altair for better y-axis control
-import altair as alt
 
 # Prepare data in long format for Altair
 chart_rows = []
@@ -479,7 +608,7 @@ chart = (
     alt.Chart(chart_df)
     .mark_bar()
     .encode(
-        x=alt.X("Week:N", title="Week"),
+        x=alt.X("Week:N", title="Week", sort=week_numbers),
         y=alt.Y(
             "Distance (km):Q",
             scale=alt.Scale(domain=[0, chart_df["Distance (km)"].max() * 1.1]),
@@ -498,7 +627,9 @@ st.markdown("---")
 st.markdown("### 📅 Monthly Recap (Jan - May 2026)")
 
 monthly_data = defaultdict(
-    lambda: defaultdict(lambda: {"distance": 0, "effort_distance": 0, "activities": 0, "duration": 0})
+    lambda: defaultdict(
+        lambda: {"distance": 0, "effort_distance": 0, "activities": 0, "duration": 0}
+    )
 )
 
 # Compute monthly data
@@ -510,8 +641,7 @@ for activity in all_activities:
         user = activity["user_name"]
         distance_km = (activity["distance_m"] or 0) / 1000
         effort_km = calculate_effort_distance(
-            activity.get("distance_m") or 0,
-            activity.get("elevation_gain_m") or 0
+            activity.get("distance_m") or 0, activity.get("elevation_gain_m") or 0
         )
         monthly_data[month][user]["distance"] += distance_km
         monthly_data[month][user]["effort_distance"] += effort_km
@@ -532,15 +662,11 @@ for user_info in users:
 
     row = {"Runner": display_name}
 
-    # Add km (with effort) and activity count for each month
     for month_key, month_name in zip(months_to_show, month_names):
         data = monthly_data[month_key][user]
-        if data["activities"] > 0:
-            row[f"{month_name} km"] = f"{data['distance']:.1f} ({data['effort_distance']:.1f} effort)"
-            row[f"{month_name} #"] = data["activities"]
-        else:
-            row[f"{month_name} km"] = "—"
-            row[f"{month_name} #"] = "—"
+        row[f"{month_name} [km]"] = round(data["distance"], 1) if data["activities"] > 0 else None
+        row[f"{month_name} [km effort]"] = round(data["effort_distance"], 1) if data["activities"] > 0 else None
+        row[f"{month_name} [#]"] = data["activities"] if data["activities"] > 0 else None
 
     table_data.append(row)
 
@@ -560,9 +686,7 @@ activity_rows = []
 for activity in recent_activities:
     user_info = next((u for u in users if u["name"] == activity["user_name"]), None)
     display_name = (
-        user_info["display_name"]
-        if user_info
-        else activity["user_name"].capitalize()
+        user_info["display_name"] if user_info else activity["user_name"].capitalize()
     )
 
     # Parse date
@@ -576,15 +700,17 @@ for activity in recent_activities:
     duration = format_duration(activity["duration_s"] or 0)
     activity_type = activity["activity_type"].replace("_", " ").title()
 
-    activity_rows.append({
-        "Date": date_str,
-        "Who": display_name,
-        "Type": activity_type,
-        "Distance": f"{distance_km:.1f} km",
-        "Elevation": format_elevation(elevation_gain),
-        "Effort Dist": f"{effort_km:.1f} km",
-        "Duration": duration,
-    })
+    activity_rows.append(
+        {
+            "Date": date_str,
+            "Who": display_name,
+            "Type": activity_type,
+            "Distance [km]": round(distance_km, 1),
+            "Elevation [m]": int(elevation_gain) if elevation_gain > 0 else None,
+            "Effort Dist [km]": round(effort_km, 1),
+            "Duration": duration,
+        }
+    )
 
 if activity_rows:
     df = pd.DataFrame(activity_rows)
